@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Playto Payout Engine</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f9fafb;
+            color: #111827;
+            padding: 2rem;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { font-size: 2.25rem; margin-bottom: 2rem; font-weight: 700; }
+        .select-group { margin-bottom: 1.5rem; }
+        label { display: block; font-size: 0.875rem; font-weight: 500; color: #374151; margin-bottom: 0.5rem; }
+        select, input, button { padding: 0.5rem 1rem; border: 1px solid #d1d5db; border-radius: 0.5rem; font-size: 1rem; }
+        select { width: 100%; }
+        button { background: #3b82f6; color: white; cursor: pointer; width: 100%; margin-top: 1rem; }
+        button:hover { background: #2563eb; }
+        .card { background: white; border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+        .balance-box { padding: 1rem; border-radius: 0.5rem; border: 1px solid #d1d5db; }
+        .balance-box.ledger { background: #eff6ff; border-color: #bfdbfe; }
+        .balance-box.held { background: #fffbeb; border-color: #fde68a; }
+        .balance-box.available { background: #f0fdf4; border-color: #bbf7d0; }
+        .balance-label { font-size: 0.875rem; color: #6b7280; margin-bottom: 0.5rem; }
+        .balance-amount { font-size: 1.5rem; font-weight: 700; font-family: monospace; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+        th { background: #f3f4f6; padding: 0.75rem; text-align: left; font-weight: 600; border-bottom: 2px solid #e5e7eb; }
+        td { padding: 0.75rem; border-bottom: 1px solid #e5e7eb; }
+        .badge { display: inline-block; padding: 0.25rem 0.75rem; border-radius: 0.25rem; font-size: 0.75rem; font-weight: 600; }
+        .badge-credit { background: #dcfce7; color: #166534; }
+        .badge-debit { background: #fee2e2; color: #991b1b; }
+        .badge-pending { background: #fef3c7; color: #92400e; }
+        .badge-processing { background: #dbeafe; color: #1e40af; }
+        .badge-completed { background: #dcfce7; color: #166534; }
+        .badge-failed { background: #fee2e2; color: #991b1b; }
+        input[type="number"] { width: 100%; }
+        .form-group { margin-bottom: 1rem; }
+        .error { color: #dc2626; background: #fee2e2; padding: 0.75rem; border-radius: 0.5rem; margin-top: 1rem; }
+        .success { color: #059669; background: #dcfce7; padding: 0.75rem; border-radius: 0.5rem; margin-top: 1rem; }
+        .loading { text-align: center; color: #6b7280; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>💳 Playto Payout Engine</h1>
+
+        <div class="card">
+            <div class="select-group">
+                <label>Select Merchant</label>
+                <select id="merchantSelect" onchange="onMerchantChange()">
+                    <option value="">Loading merchants...</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="balanceCard" style="display:none;">
+            <div class="card">
+                <h2>Balance Summary</h2>
+                <div class="grid">
+                    <div class="balance-box ledger">
+                        <div class="balance-label">Ledger Balance</div>
+                        <div class="balance-amount" id="ledgerBalance">₹0.00</div>
+                    </div>
+                    <div class="balance-box held">
+                        <div class="balance-label">Held Balance</div>
+                        <div class="balance-amount" id="heldBalance">₹0.00</div>
+                    </div>
+                    <div class="balance-box available">
+                        <div class="balance-label">Available Balance</div>
+                        <div class="balance-amount" id="availableBalance">₹0.00</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="payoutForm" style="display:none;">
+            <div class="card">
+                <h2>Request Payout</h2>
+                <div class="form-group">
+                    <label>Amount (₹)</label>
+                    <input type="number" id="amountInput" step="0.01" min="0" placeholder="100.50">
+                </div>
+                <div class="form-group">
+                    <label>Bank Account</label>
+                    <select id="bankAccountSelect">
+                        <option value="ACC001">ACC001</option>
+                        <option value="ACC002">ACC002</option>
+                    </select>
+                </div>
+                <button onclick="createPayout()">Request Payout</button>
+                <div id="payoutMessage"></div>
+            </div>
+        </div>
+
+        <div id="ledgerSection" style="display:none;">
+            <div class="card">
+                <h2>Ledger</h2>
+                <div id="ledgerTableContainer" class="loading">Loading...</div>
+            </div>
+        </div>
+
+        <div id="payoutSection" style="display:none;">
+            <div class="card">
+                <h2>Payout History</h2>
+                <div id="payoutTableContainer" class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api/v1';
+        let selectedMerchantId = null;
+
+        // Fetch merchants on load
+        async function loadMerchants() {
+            try {
+                const response = await fetch(`${API_URL}/merchants/`);
+                const merchants = await response.json();
+                const select = document.getElementById('merchantSelect');
+                select.innerHTML = '';
+                merchants.forEach(m => {
+                    const option = document.createElement('option');
+                    option.value = m.id;
+                    option.textContent = m.name;
+                    select.appendChild(option);
+                });
+                if (merchants.length > 0) {
+                    select.value = merchants[0].id;
+                    onMerchantChange();
+                }
+            } catch (error) {
+                console.error('Error loading merchants:', error);
+            }
+        }
+
+        async function onMerchantChange() {
+            selectedMerchantId = document.getElementById('merchantSelect').value;
+            if (selectedMerchantId) {
+                document.getElementById('balanceCard').style.display = 'block';
+                document.getElementById('payoutForm').style.display = 'block';
+                document.getElementById('ledgerSection').style.display = 'block';
+                document.getElementById('payoutSection').style.display = 'block';
+                loadBalance();
+                loadLedger();
+                loadPayouts();
+                // Auto-refresh every 5 seconds
+                setInterval(() => loadPayouts(), 5000);
+            }
+        }
+
+        function formatRupees(paise) {
+            const rupees = paise / 100;
+            return '₹' + rupees.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('en-IN') + ' ' + date.toLocaleTimeString('en-IN');
+        }
+
+        async function loadBalance() {
+            try {
+                const response = await fetch(`${API_URL}/merchants/${selectedMerchantId}/balance/`);
+                const data = await response.json();
+                document.getElementById('ledgerBalance').textContent = formatRupees(data.ledger_balance);
+                document.getElementById('heldBalance').textContent = formatRupees(data.held_balance);
+                document.getElementById('availableBalance').textContent = formatRupees(data.available_balance);
+            } catch (error) {
+                console.error('Error loading balance:', error);
+            }
+        }
+
+        async function loadLedger() {
+            try {
+                const response = await fetch(`${API_URL}/merchants/${selectedMerchantId}/ledger/`);
+                const data = await response.json();
+                const entries = data.results || [];
+                let html = '<table><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th></tr></thead><tbody>';
+                if (entries.length === 0) {
+                    html += '<tr><td colspan="4" style="text-align:center;color:#9ca3af;">No entries</td></tr>';
+                } else {
+                    entries.forEach(entry => {
+                        const badge = entry.entry_type === 'credit' ? 'badge-credit' : 'badge-debit';
+                        html += `<tr>
+                            <td>${formatDate(entry.created_at)}</td>
+                            <td><span class="badge ${badge}">${entry.entry_type.toUpperCase()}</span></td>
+                            <td>${entry.description}</td>
+                            <td style="text-align:right;font-family:monospace;">${formatRupees(entry.amount_paise)}</td>
+                        </tr>`;
+                    });
+                }
+                html += '</tbody></table>';
+                document.getElementById('ledgerTableContainer').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading ledger:', error);
+            }
+        }
+
+        async function loadPayouts() {
+            try {
+                const response = await fetch(`${API_URL}/merchants/${selectedMerchantId}/payouts/`);
+                const data = await response.json();
+                const payouts = data.results || [];
+                let html = '<table><thead><tr><th>ID</th><th>Amount</th><th>Status</th><th>Created</th><th>Updated</th></tr></thead><tbody>';
+                if (payouts.length === 0) {
+                    html += '<tr><td colspan="5" style="text-align:center;color:#9ca3af;">No payouts</td></tr>';
+                } else {
+                    payouts.forEach(payout => {
+                        const statusBadge = `badge-${payout.status}`;
+                        const shortId = payout.id.substring(0, 8) + '...';
+                        html += `<tr>
+                            <td style="font-family:monospace;font-size:0.75rem;">${shortId}</td>
+                            <td style="font-family:monospace;">${formatRupees(payout.amount_paise)}</td>
+                            <td><span class="badge ${statusBadge}">${payout.status.toUpperCase()}</span></td>
+                            <td>${formatDate(payout.created_at)}</td>
+                            <td>${formatDate(payout.updated_at)}</td>
+                        </tr>`;
+                    });
+                }
+                html += '</tbody></table>';
+                document.getElementById('payoutTableContainer').innerHTML = html;
+            } catch (error) {
+                console.error('Error loading payouts:', error);
+            }
+        }
+
+        async function createPayout() {
+            const amount = parseFloat(document.getElementById('amountInput').value);
+            const bankAccountId = document.getElementById('bankAccountSelect').value;
+            const messageDiv = document.getElementById('payoutMessage');
+
+            if (amount <= 0) {
+                messageDiv.innerHTML = '<div class="error">Amount must be greater than 0</div>';
+                return;
+            }
+
+            const amountPaise = Math.round(amount * 100);
+            const idempotencyKey = 'payout-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
+            try {
+                const response = await fetch(`${API_URL}/payouts/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Idempotency-Key': idempotencyKey
+                    },
+                    body: JSON.stringify({
+                        merchant_id: selectedMerchantId,
+                        amount_paise: amountPaise,
+                        bank_account_id: bankAccountId
+                    })
+                });
+
+                if (response.ok) {
+                    messageDiv.innerHTML = '<div class="success">✓ Payout requested successfully!</div>';
+                    document.getElementById('amountInput').value = '';
+                    setTimeout(() => {
+                        loadBalance();
+                        loadLedger();
+                        loadPayouts();
+                    }, 500);
+                } else if (response.status === 409) {
+                    messageDiv.innerHTML = '<div class="error">✗ Insufficient funds</div>';
+                } else {
+                    const error = await response.json();
+                    messageDiv.innerHTML = '<div class="error">✗ ' + (error.detail || 'Error creating payout') + '</div>';
+                }
+            } catch (error) {
+                messageDiv.innerHTML = '<div class="error">✗ Error: ' + error.message + '</div>';
+            }
+        }
+
+        // Load merchants on page load
+        loadMerchants();
+    </script>
+</body>
+</html>
