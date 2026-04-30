@@ -3,7 +3,7 @@ services:
     name: playto-payout-api
     runtime: python
     plan: free
-    pythonVersion: 3.11
+    python: 3.11
     region: oregon
     
     envVars:
@@ -44,7 +44,7 @@ services:
     name: playto-payout-celery-worker
     runtime: python
     plan: free
-    pythonVersion: 3.11
+    python: 3.11
     region: oregon
     
     envVars:
@@ -70,7 +70,7 @@ services:
     name: playto-payout-celery-beat
     runtime: python
     plan: free
-    pythonVersion: 3.11
+    python: 3.11
     region: oregon
     
     envVars:
@@ -95,10 +95,10 @@ services:
 databases:
   - name: playto-payout-db
     engine: postgres
+    postgresVersion: 15
     plan: free
-    version: "15"
     
   - name: playto-payout-redis
     engine: redis
+    redisVersion: 7
     plan: free
-    version: "7"
